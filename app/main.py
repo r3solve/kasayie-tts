@@ -21,8 +21,8 @@ app.add_middleware(
 )
 
 # Initialize Supabase client
-SUPABASE_URL = "https://your-project.supabase.co"  # Replace with your Supabase URL
-SUPABASE_KEY = "your-anon-or-service-role-key"    # Replace with your Supabase anon or service key
+SUPABASE_URL = "https://rcgkpwiuviamuihrrfuw.supabase.co"  # Replace with your Supabase URL
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjZ2twd2l1dmlhbXVpaHJyZnV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA2NjI0NjAsImV4cCI6MjA1NjIzODQ2MH0.BzU2TOnzB1dY-mbk6mrkiknk_mN-IGvYePbBEfvuiiQ"    # Replace with your Supabase anon or service key
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize TTS pipeline from Huggingface transformers
