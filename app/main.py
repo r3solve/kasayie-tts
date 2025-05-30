@@ -1,17 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import pipeline
-import soundfile as sf
 import numpy as np
-import os
 import uuid
-from scipy.io.wavfile import write as scipy_write
+from pydub import AudioSegment
+import io
 from fastapi.middleware.cors import CORSMiddleware
+from supabase import create_client, Client
+from gtts import gTTS
 
-
-
+# Initialize FastAPI app
 app = FastAPI(title="Kasayie TTS API")
 
+# Enable CORS for all origins (adjust as needed)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,22 +20,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Supabase client
+SUPABASE_URL = "https://your-project.supabase.co"  # Replace with your Supabase URL
+SUPABASE_KEY = "your-anon-or-service-role-key"    # Replace with your Supabase anon or service key
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Initialize TTS pipeline from Huggingface transformers
 pipe = pipeline("text-to-audio", model="d3vnerd/TTS_twi_test")
 
-AUDIO_DIR = "/static/audio"
-os.makedirs(AUDIO_DIR, exist_ok=True)
-
-BASE_URL = "http://localhost:8000"
-
+# Pydantic model for request body
 class TTSRequest(BaseModel):
     text: str
 
 @app.get("/")
 def root():
     return {"detail": "Welcome to Kasayie TTS. Visit /docs for documentation"}
-
-from pydub import AudioSegment
-import io
 
 @app.post("/generate_tts/")
 async def generate_tts(request: TTSRequest):
@@ -43,6 +43,7 @@ async def generate_tts(request: TTSRequest):
         raise HTTPException(status_code=400, detail="Text input cannot be empty")
 
     try:
+        # Generate audio from text
         output = pipe(text)
         audio = output["audio"]
         if not isinstance(audio, np.ndarray):
@@ -53,7 +54,7 @@ async def generate_tts(request: TTSRequest):
             audio = audio.astype(np.float32)
         audio = np.clip(audio, -1.0, 1.0)
 
-        # Convert float32 numpy array (-1.0 to 1.0) to int16 for pydub
+        # Convert float32 numpy array to int16 for pydub
         audio_int16 = (audio * 32767).astype(np.int16)
 
         # Create AudioSegment from raw audio data
@@ -64,20 +65,27 @@ async def generate_tts(request: TTSRequest):
             channels=1       # assuming mono audio
         )
 
+        # Export audio to in-memory bytes buffer as MP3
+        mp3_buffer = io.BytesIO()
+        audio_segment.export(mp3_buffer, format="mp3")
+        mp3_buffer.seek(0)
+
+        # Generate unique filename
         filename = f"{uuid.uuid4()}.mp3"
-        filepath = os.path.join(AUDIO_DIR, filename)
 
-        # Export as MP3
-        audio_segment.export(filepath, format="mp3")
+        # Upload to Supabase storage bucket named "audio"
+        response = supabase.storage.from_('audio').upload(filename, mp3_buffer, {'content-type': 'audio/mpeg'})
 
-        audio_url = f"static/audio/{filename}"
-        return {"audio_url": audio_url}
+        if response.get('error'):
+            raise HTTPException(status_code=500, detail=f"Supabase upload error: {response['error']['message']}")
+
+        # Get public URL for uploaded file
+        public_url = supabase.storage.from_('audio').get_public_url(filename)
+
+        return {"audio_url": public_url}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audio processing error: {str(e)}")
-
-
-from gtts import gTTS
 
 @app.post("/generate_eng_tts/")
 async def generate_eng_tts(request: TTSRequest):
@@ -86,19 +94,27 @@ async def generate_eng_tts(request: TTSRequest):
         raise HTTPException(status_code=400, detail="Text input cannot be empty")
 
     try:
+        # Generate TTS using gTTS
         tts = gTTS(text=text, lang='en')
+
+        # Save to in-memory bytes buffer
+        mp3_buffer = io.BytesIO()
+        tts.write_to_fp(mp3_buffer)
+        mp3_buffer.seek(0)
+
+        # Generate unique filename
         filename = f"{uuid.uuid4()}.mp3"
-        filepath = os.path.join(AUDIO_DIR, filename)
 
-        # Save the TTS output as an MP3 file
-        tts.save(filepath)
+        # Upload to Supabase storage bucket "audio"
+        response = supabase.storage.from_('audio').upload(filename, mp3_buffer, {'content-type': 'audio/mpeg'})
 
-        audio_url = f"static/audio/{filename}"
-        return {"audio_url": audio_url}
+        if response.get('error'):
+            raise HTTPException(status_code=500, detail=f"Supabase upload error: {response['error']['message']}")
+
+        # Get public URL for uploaded file
+        public_url = supabase.storage.from_('audio').get_public_url(filename)
+
+        return {"audio_url": public_url}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"gTTS processing error: {str(e)}")
-
-
-from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory="static"), name="static")
